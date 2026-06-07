@@ -9,7 +9,7 @@ import time
 # ================= 版面與全局設定 =================
 st.set_page_config(page_title="科學化肌力訓練艙", layout="wide")
 
-# 🟢 已為你替換成最新版的 Google Apps Script URL！
+# 🟢 你的 Google Apps Script URL (不需更改)
 GAS_URL = "https://script.google.com/macros/s/AKfycbztfxKApaVJLmG11eO6ZinQ6KXigxZkTm65bVZcN-O7XubE7Sdfjrb-w0P5LNT2Qvlyzw/exec"
 
 st.markdown("""
@@ -22,7 +22,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("🏋️‍♂️ 個人化肌力")
-
 
 # ================= 資料讀取函數 =================
 @st.cache_data(ttl=5) 
@@ -61,13 +60,22 @@ with st.sidebar:
             "最大肌力期 (Max Strength)", "減量期 (Deload)", "PR 測試 (Peaking)"
         ])
         
+        # 🟢 新增：主項與補強的智慧切換開關
+        train_type = st.radio("🎯 動作定位", ["👑 主項 (Main Lift)", "🛠️ 輔助補強 (Accessory)"], horizontal=True)
+        
         col_m1, col_m2 = st.columns(2)
         with col_m1:
-            muscle = st.selectbox("目標肌群", ["胸", "背", "腿", "肩", "核心", "全身"])
+            # 根據定位動態切換細分肌群 (融合了朋友的專業建議)
+            if "補強" in train_type:
+                muscle = st.selectbox("細分肌群", ["胸 (Chest)", "肩 (Shoulders)", "背 (Back)", "臀部 (Glutes)", "腿後 (Hamstrings)", "小腿 (Calves)", "股四頭 (Quads)", "手臂 (Arms)", "核心 (Core)"])
+            else:
+                muscle = st.selectbox("主項肌群", ["胸 (Chest)", "背 (Back)", "腿 (Legs)", "肩 (Shoulders)", "全身 (Full Body)"])
+                
         with col_m2:
-            pattern = st.selectbox("動作模式", ["上肢推", "上肢拉", "下肢推", "下肢拉", "核心/斜向"])
+            # 增加單關節孤立選項，讓飛鳥、小腿提踵也能精準分類
+            pattern = st.selectbox("動作模式", ["上肢推", "上肢拉", "下肢推", "下肢拉", "核心/斜向", "單關節孤立"])
             
-        exercise = st.text_input("動作名稱 (如：槓鈴臥推)")
+        exercise = st.text_input("動作名稱 (如：哈克深蹲、飛鳥)")
         
         st.markdown("---")
         intensity = st.number_input("目標強度 (% 1RM)", min_value=0.0, max_value=120.0, value=75.0, step=2.5)
@@ -86,15 +94,20 @@ with st.sidebar:
         if submit_btn:
             if exercise and weight > 0:
                 volume = weight * reps * sets
-                est_1rm = round(weight * (1 + (reps / 30)), 1)
+                # 如果是補強動作，Est_1RM 雖然會算，但參考價值較低，主要看 Volume
+                est_1rm = round(weight * (1 + (reps / 30)), 1) 
                 
                 unique_id = f"ID_{int(time.time() * 1000)}"
+                
+                # 為了後續分析方便，將 [主項] 或 [補強] 標籤加在筆記前
+                type_tag = "[補強]" if "補強" in train_type else "[主項]"
+                final_notes = f"{type_tag} {notes}" if notes else type_tag
                 
                 payload = {
                     "action": "add", "Date": str(date), "Phase": phase, "Muscle_Group": muscle, 
                     "Movement_Pattern": pattern, "Exercise": exercise, "Weight_kg": weight, "Reps": reps, 
                     "Sets": sets, "RPE": rpe, "Intensity_Pct": intensity, 
-                    "Volume": volume, "Est_1RM": est_1rm, "Notes": notes, "ID": unique_id
+                    "Volume": volume, "Est_1RM": est_1rm, "Notes": final_notes, "ID": unique_id
                 }
                 
                 with st.spinner("寫入雲端資料庫中..."):
@@ -201,10 +214,9 @@ else:
         
         col_chart1, col_chart2 = st.columns([1, 1.2])
         
-        # 1. 1RM 生涯極限突破曲線
         with col_chart1:
             if 'Exercise' in df.columns:
-                selected_ex = st.selectbox("選擇動作動作查看 1RM 突破軌跡", df['Exercise'].dropna().unique())
+                selected_ex = st.selectbox("選擇主項動作查看 1RM 突破", df['Exercise'].dropna().unique())
                 ex_df = df[df['Exercise'] == selected_ex].sort_values('Date')
                 
                 if not ex_df.empty:
@@ -216,38 +228,38 @@ else:
                     fig_line.update_traces(line_color='#F59E0B', marker=dict(size=8))
                     st.plotly_chart(fig_line, use_container_width=True)
 
-        # 2. 肌群與動作容量矩陣樹狀圖
         with col_chart2:
             if 'Muscle_Group' in df.columns and 'Volume' in df.columns:
                 tree_df = df.groupby(['Muscle_Group', 'Exercise'])['Volume'].sum().reset_index()
                 tree_df = tree_df[tree_df['Volume'] > 0]
                 
                 if not tree_df.empty:
+                    # 這張圖現在會完美展現「臀部」、「腿後」、「小腿」等輔助訓練的佔比
                     fig_tree = px.treemap(tree_df, path=['Muscle_Group', 'Exercise'], values='Volume',
-                                          title="重訓容量幾何分佈矩陣",
+                                          title="主項與補強容量分佈矩陣 (點擊區塊放大)",
                                           color='Muscle_Group', color_discrete_sequence=px.colors.qualitative.Pastel)
                     st.plotly_chart(fig_tree, use_container_width=True)
 
         st.markdown("---")
         
-        # 3. 週期化訓練強度軌跡觀測 (氣泡圖)
-        st.markdown("#### 🎯 週期化訓練強度 (% 1RM) 軌跡觀測")
-        st.markdown("藉此觀察你的課表是否符合波浪型週期化。**圓圈大小代表該次訓練的「總容量」**，顏色代表「訓練週期」。")
+        # 🟢 為了容納更多細分部位，擴充雷達圖底層結構
+        st.markdown("#### 🕸️ 高階肌群平衡雷達網 (含細分補強)")
+        base_muscles = pd.DataFrame({"Muscle_Group": [
+            "胸 (Chest)", "肩 (Shoulders)", "背 (Back)", "核心 (Core)", 
+            "臀部 (Glutes)", "大腿前側/腿 (Quads)", "腿後 (Hamstrings)", "小腿 (Calves)", "手臂 (Arms)"
+        ]})
         
-        if 'Intensity_Pct' in df.columns:
-            intensity_df = df[(df['Intensity_Pct'] > 0) & (df['Volume'] > 0)].copy()
-            if not intensity_df.empty:
-                fig_int = px.scatter(
-                    intensity_df, x='Date', y='Intensity_Pct', color='Phase', size='Volume',
-                    hover_name='Exercise', hover_data={'Date': True, 'Weight_kg': True, 'Reps': True, 'Sets': True, 'Volume': False},
-                    labels={'Intensity_Pct': '目標強度 (% 1RM)', 'Date': '訓練日期', 'Phase': '訓練週期'},
-                    color_discrete_sequence=px.colors.qualitative.Bold
-                )
-                fig_int.update_traces(marker=dict(line=dict(width=1, color='rgba(255,255,255,0.8)')))
-                fig_int.update_layout(yaxis=dict(range=[0, max(110, intensity_df['Intensity_Pct'].max() + 10)]))
-                st.plotly_chart(fig_int, use_container_width=True)
-            else:
-                st.info("尚無有效的強度 % 數據可以繪製圖表。")
+        # 由於歷史數據可能有舊的名稱 (如 "腿 (Legs)")，將它們統一加起來顯示
+        vol_df = df.copy()
+        vol_df['Muscle_Group'] = vol_df['Muscle_Group'].replace({'腿 (Legs)': '大腿前側/腿 (Quads)', '腿': '大腿前側/腿 (Quads)'})
+        vol_sum = vol_df.groupby('Muscle_Group')['Volume'].sum().reset_index()
+        
+        radar_df = pd.merge(base_muscles, vol_sum, on='Muscle_Group', how='left').fillna(0)
+        
+        fig_radar = px.line_polar(radar_df, r='Volume', theta='Muscle_Group', line_close=True)
+        fig_radar.update_traces(fill='toself', line_color='#38BDF8', fillcolor='rgba(56, 189, 248, 0.4)')
+        fig_radar.update_layout(polar=dict(radialaxis=dict(visible=False)), margin=dict(t=40, b=20, l=20, r=20))
+        st.plotly_chart(fig_radar, use_container_width=True)
 
     # ----------------- 🟢 TAB 4: InBody 體態與失衡檢視 -----------------
     with tab4:
@@ -297,7 +309,7 @@ else:
             if abs(inb_r_arm - inb_l_arm) >= 0.3:
                 issues_found = True
                 weaker_arm = "左" if inb_r_arm > inb_l_arm else "右"
-                st.markdown(f"""<div class="alert-card"><b>🚨 上肢左右失衡警告</b><br>InBody 顯示你的雙手肌肉量相差達 {abs(inb_r_arm - inb_l_arm):.1f}kg。<br><b>處方：</b> 請強制加入<b>單邊啞鈴訓練</b>，並由較弱的「{weaker_arm}手」先開始執行！</div>""", unsafe_allow_html=True)
+                st.markdown(f"""<div class="alert-card"><b>🚨 上肢左右失衡警告</b><br>InBody 顯示你的雙手肌肉量相差達 {abs(inb_r_arm - inb_l_arm):.1f}kg。<br><b>處方：</b> 請強制加入<b>單邊啞鈴訓練或 Cable 單手補強</b>，並由較弱的「{weaker_arm}手」先開始執行！</div>""", unsafe_allow_html=True)
                 
             if abs(inb_r_leg - inb_l_leg) >= 0.4:
                 issues_found = True
@@ -307,12 +319,12 @@ else:
             if up_push > 0 and up_pull > 0:
                 if up_push > up_pull * 1.3:
                     issues_found = True
-                    st.markdown(f"""<div class="alert-card"><b>🚨 圓肩危機：推 > 拉</b><br>本月你的「上肢推」容量是「上肢拉」的 {up_push/up_pull:.1f} 倍。<br><b>處方：</b> 胸練太多了！請將背部（划船、引體向上）比例拉高，或加入面拉 (Face Pull)。</div>""", unsafe_allow_html=True)
+                    st.markdown(f"""<div class="alert-card"><b>🚨 圓肩危機：推 > 拉</b><br>本月你的「上肢推」容量是「上肢拉」的 {up_push/up_pull:.1f} 倍。<br><b>處方：</b> 胸練太多了！請將背部（划船、引體向上）比例拉高，或加入面拉 (Face Pull) 補強。</div>""", unsafe_allow_html=True)
             
             if low_push > 0 and low_pull > 0:
                 if low_push > low_pull * 1.5:
                     issues_found = True
-                    st.markdown(f"""<div class="alert-card"><b>🚨 骨盆前傾危機：股四頭肌主導</b><br>本月「下肢推(深蹲)」遠大於「下肢拉(硬舉)」。<br><b>處方：</b> 請加入羅馬尼亞硬舉 (RDL) 或腿後勾，強化臀腿後側鏈！</div>""", unsafe_allow_html=True)
+                    st.markdown(f"""<div class="alert-card"><b>🚨 骨盆前傾危機：股四頭肌主導</b><br>本月「下肢推(深蹲)」遠大於「下肢拉(硬舉)」。<br><b>處方：</b> 請加入羅馬尼亞硬舉 (RDL) 或腿後勾，專注於<b>臀部與腿後</b>的弱點補強！</div>""", unsafe_allow_html=True)
 
             if not issues_found:
                 st.markdown(f"""<div class="coach-card"><b>🏆 體態平衡極佳！</b><br>目前的 InBody 對稱性非常好，且本月的推拉比例相當健康。請繼續保持這份完美的課表！</div>""", unsafe_allow_html=True)
