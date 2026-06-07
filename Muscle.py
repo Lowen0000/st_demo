@@ -9,7 +9,7 @@ import time
 # ================= 版面與全局設定 =================
 st.set_page_config(page_title="科學化肌力訓練艙", layout="wide")
 
-# 🟢 你的 Google Apps Script URL (不需更改)
+# 🟢 你的 Google Apps Script URL (已串通)
 GAS_URL = "https://script.google.com/macros/s/AKfycbztfxKApaVJLmG11eO6ZinQ6KXigxZkTm65bVZcN-O7XubE7Sdfjrb-w0P5LNT2Qvlyzw/exec"
 
 st.markdown("""
@@ -60,29 +60,26 @@ with st.sidebar:
             "最大肌力期 (Max Strength)", "減量期 (Deload)", "PR 測試 (Peaking)"
         ])
         
-        # 🟢 新增：主項與補強的智慧切換開關
         train_type = st.radio("🎯 動作定位", ["👑 主項 (Main Lift)", "🛠️ 輔助補強 (Accessory)"], horizontal=True)
         
         col_m1, col_m2 = st.columns(2)
         with col_m1:
-            # 根據定位動態切換細分肌群 (融合了朋友的專業建議)
             if "補強" in train_type:
                 muscle = st.selectbox("細分肌群", ["胸 (Chest)", "肩 (Shoulders)", "背 (Back)", "臀部 (Glutes)", "腿後 (Hamstrings)", "小腿 (Calves)", "股四頭 (Quads)", "手臂 (Arms)", "核心 (Core)"])
             else:
                 muscle = st.selectbox("主項肌群", ["胸 (Chest)", "背 (Back)", "腿 (Legs)", "肩 (Shoulders)", "全身 (Full Body)"])
                 
         with col_m2:
-            # 增加單關節孤立選項，讓飛鳥、小腿提踵也能精準分類
             pattern = st.selectbox("動作模式", ["上肢推", "上肢拉", "下肢推", "下肢拉", "核心/斜向", "單關節孤立"])
             
-        exercise = st.text_input("動作名稱 (如：哈克深蹲、飛鳥)")
+        exercise = st.text_input("動作名稱 (如：引體向上)")
         
         st.markdown("---")
         intensity = st.number_input("目標強度 (% 1RM)", min_value=0.0, max_value=120.0, value=75.0, step=2.5)
         
         col1, col2 = st.columns(2)
         with col1:
-            weight = st.number_input("重量 (kg)", min_value=0.0, step=2.5)
+            weight = st.number_input("重量 (kg) 💡徒手可填0或體重", min_value=0.0, step=2.5)
             sets = st.number_input("組數 (Sets)", min_value=1, step=1)
         with col2:
             reps = st.number_input("次數 (Reps)", min_value=1, step=1)
@@ -92,14 +89,13 @@ with st.sidebar:
         submit_btn = st.form_submit_button("🚀 送出紀錄")
         
         if submit_btn:
-            if exercise and weight > 0:
+            # 🟢 修正：拿掉 weight > 0 的限制，只要有寫動作名稱就可以送出！
+            if exercise:
                 volume = weight * reps * sets
-                # 如果是補強動作，Est_1RM 雖然會算，但參考價值較低，主要看 Volume
                 est_1rm = round(weight * (1 + (reps / 30)), 1) 
                 
                 unique_id = f"ID_{int(time.time() * 1000)}"
                 
-                # 為了後續分析方便，將 [主項] 或 [補強] 標籤加在筆記前
                 type_tag = "[補強]" if "補強" in train_type else "[主項]"
                 final_notes = f"{type_tag} {notes}" if notes else type_tag
                 
@@ -117,7 +113,7 @@ with st.sidebar:
                         st.cache_data.clear() 
                         st.rerun() 
             else:
-                st.warning("請填寫動作名稱與有效重量！")
+                st.warning("請填寫動作名稱！(重量可以填 0)")
 
 # ================= 主畫面：數據儀表板 =================
 df = load_data()
@@ -234,7 +230,6 @@ else:
                 tree_df = tree_df[tree_df['Volume'] > 0]
                 
                 if not tree_df.empty:
-                    # 這張圖現在會完美展現「臀部」、「腿後」、「小腿」等輔助訓練的佔比
                     fig_tree = px.treemap(tree_df, path=['Muscle_Group', 'Exercise'], values='Volume',
                                           title="主項與補強容量分佈矩陣 (點擊區塊放大)",
                                           color='Muscle_Group', color_discrete_sequence=px.colors.qualitative.Pastel)
@@ -242,14 +237,12 @@ else:
 
         st.markdown("---")
         
-        # 🟢 為了容納更多細分部位，擴充雷達圖底層結構
         st.markdown("#### 🕸️ 高階肌群平衡雷達網 (含細分補強)")
         base_muscles = pd.DataFrame({"Muscle_Group": [
             "胸 (Chest)", "肩 (Shoulders)", "背 (Back)", "核心 (Core)", 
             "臀部 (Glutes)", "大腿前側/腿 (Quads)", "腿後 (Hamstrings)", "小腿 (Calves)", "手臂 (Arms)"
         ]})
         
-        # 由於歷史數據可能有舊的名稱 (如 "腿 (Legs)")，將它們統一加起來顯示
         vol_df = df.copy()
         vol_df['Muscle_Group'] = vol_df['Muscle_Group'].replace({'腿 (Legs)': '大腿前側/腿 (Quads)', '腿': '大腿前側/腿 (Quads)'})
         vol_sum = vol_df.groupby('Muscle_Group')['Volume'].sum().reset_index()
