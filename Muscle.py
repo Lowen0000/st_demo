@@ -18,6 +18,7 @@ st.markdown("""
     .coach-card { background-color: #F3F4F6; color: #0F172A !important; padding: 20px; border-radius: 10px; border-left: 5px solid #3B82F6; margin-bottom: 10px; }
     .alert-card { background-color: #FEF2F2; color: #7F1D1D !important; padding: 20px; border-radius: 10px; border-left: 5px solid #EF4444; margin-bottom: 10px; }
     .gold-card { background-color: #FFFBEB; color: #78350F !important; padding: 20px; border-radius: 10px; border-left: 5px solid #F59E0B; margin-bottom: 10px; }
+    .radar-insight-card { background-color: #F8FAFC; color: #334155 !important; padding: 20px; border-radius: 10px; border-left: 5px solid #64748B; margin-top: 15px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -37,7 +38,9 @@ def load_data():
                 
             df = pd.DataFrame(data)
             if not df.empty and 'Date' in df.columns:
-                df['Date'] = pd.to_datetime(df['Date'], errors='coerce').dt.date
+                # 🟢 修正時區 Bug：先當作 UTC 讀取，強制轉回台灣時間 (+8)，再取出日期
+                df['Date'] = pd.to_datetime(df['Date'], errors='coerce', utc=True).dt.tz_convert('Asia/Taipei').dt.date
+                
                 numeric_cols = ['Weight_kg', 'Reps', 'Sets', 'RPE', 'Intensity_Pct', 'Volume', 'Est_1RM']
                 existing_cols = [col for col in numeric_cols if col in df.columns]
                 df[existing_cols] = df[existing_cols].apply(pd.to_numeric, errors='coerce')
@@ -89,7 +92,6 @@ with st.sidebar:
         submit_btn = st.form_submit_button("🚀 送出紀錄")
         
         if submit_btn:
-            # 🟢 修正：拿掉 weight > 0 的限制，只要有寫動作名稱就可以送出！
             if exercise:
                 volume = weight * reps * sets
                 est_1rm = round(weight * (1 + (reps / 30)), 1) 
@@ -249,10 +251,43 @@ else:
         
         radar_df = pd.merge(base_muscles, vol_sum, on='Muscle_Group', how='left').fillna(0)
         
-        fig_radar = px.line_polar(radar_df, r='Volume', theta='Muscle_Group', line_close=True)
-        fig_radar.update_traces(fill='toself', line_color='#38BDF8', fillcolor='rgba(56, 189, 248, 0.4)')
-        fig_radar.update_layout(polar=dict(radialaxis=dict(visible=False)), margin=dict(t=40, b=20, l=20, r=20))
-        st.plotly_chart(fig_radar, use_container_width=True)
+        col_r1, col_r2 = st.columns([1.5, 1])
+        
+        with col_r1:
+            fig_radar = px.line_polar(radar_df, r='Volume', theta='Muscle_Group', line_close=True)
+            fig_radar.update_traces(fill='toself', line_color='#38BDF8', fillcolor='rgba(56, 189, 248, 0.4)')
+            fig_radar.update_layout(polar=dict(radialaxis=dict(visible=False)), margin=dict(t=40, b=20, l=20, r=20))
+            st.plotly_chart(fig_radar, use_container_width=True)
+            
+        with col_r2:
+            st.markdown("#### 🗣️ 雷達圖解析與教練建議")
+            if radar_df['Volume'].sum() == 0:
+                st.info("尚無訓練數據，趕快去左側新增一筆吧！")
+            else:
+                max_muscle = radar_df.loc[radar_df['Volume'].idxmax()]['Muscle_Group']
+                zero_muscles = radar_df[radar_df['Volume'] == 0]['Muscle_Group'].tolist()
+                
+                explanation = f"**1. 強勢發展區：**<br>圖表顯示你目前將最大心力投入在 **「{max_muscle}」**，雷達圖在此處明顯凸出。<br><br>"
+                
+                if zero_muscles:
+                    zero_str = "、".join(zero_muscles)
+                    explanation += f"**2. 嚴重忽略區 (警報🚨)：**<br>雷達圖往內凹陷到底的地方，代表你完全沒有紀錄過 **「{zero_str}」** 的訓練。長期的忽視容易造成關節代償與體態變形。<br><br>"
+                else:
+                    min_muscle = radar_df.loc[radar_df['Volume'].idxmin()]['Muscle_Group']
+                    explanation += f"**2. 相對弱點區：**<br>你目前訓練容量最少的是 **「{min_muscle}」**，雷達圖在此處較為凹陷。建議未來的課表可以多分配 1~2 個補強動作。<br><br>"
+                
+                non_zero_count = len(radar_df[radar_df['Volume'] > 0])
+                total_muscles = len(radar_df)
+                if non_zero_count <= 3:
+                    explanation += f"**3. 幾何平衡度：尖銳三角形**<br>你的雷達圖目前呈現極端偏科。完美的體能應該趨近於對稱的圓形，請盡快將未訓練的肌群排入課表中！"
+                elif non_zero_count < total_muscles - 2:
+                    explanation += f"**3. 幾何平衡度：不規則多邊形**<br>你的訓練涵蓋了多個部位，但仍有特定死角。試著補齊凹陷的缺口，邁向六邊形戰士！"
+                else:
+                    explanation += f"**3. 幾何平衡度：全方位發展！**<br>太棒了！你的雷達圖發展得非常均勻，主項與單關節補強都有顧及，請繼續維持！"
+                
+                st.markdown(f"""<div class="radar-insight-card">{explanation}</div>""", unsafe_allow_html=True)
+
+
 
     # ----------------- 🟢 TAB 4: InBody 體態與失衡檢視 -----------------
     with tab4:
