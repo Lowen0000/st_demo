@@ -9,7 +9,7 @@ import time
 # ================= 版面與全局設定 =================
 st.set_page_config(page_title="科學化肌力訓練艙", layout="wide")
 
-# 🟢 你的 Google Apps Script URL (已串通)
+# 🟢 你的 Google Apps Script URL
 GAS_URL = "https://script.google.com/macros/s/AKfycbztfxKApaVJLmG11eO6ZinQ6KXigxZkTm65bVZcN-O7XubE7Sdfjrb-w0P5LNT2Qvlyzw/exec"
 
 st.markdown("""
@@ -38,9 +38,7 @@ def load_data():
                 
             df = pd.DataFrame(data)
             if not df.empty and 'Date' in df.columns:
-                # 🟢 修正時區 Bug：先當作 UTC 讀取，強制轉回台灣時間 (+8)，再取出日期
                 df['Date'] = pd.to_datetime(df['Date'], errors='coerce', utc=True).dt.tz_convert('Asia/Taipei').dt.date
-                
                 numeric_cols = ['Weight_kg', 'Reps', 'Sets', 'RPE', 'Intensity_Pct', 'Volume', 'Est_1RM']
                 existing_cols = [col for col in numeric_cols if col in df.columns]
                 df[existing_cols] = df[existing_cols].apply(pd.to_numeric, errors='coerce')
@@ -134,11 +132,65 @@ else:
     
     st.markdown("---")
     
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🤖 專屬教練", "📈 體能預測", "📊 數據圖表", "🧍‍♂️ InBody 檢視", "📋 歷史清單"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🤖 專屬教練", "📈 ACWR 疲勞監控", "📊 數據圖表", "🧍‍♂️ InBody 檢視", "📋 歷史清單"])
     
     # ----------------- 🟢 TAB 1: 專屬教練建議 -----------------
     with tab1:
-        st.markdown("### 🔍 基於近期數據的戰術分析")
+        st.markdown("### ⏱️ 週期進度與轉換雷達")
+        if not df.empty and 'Phase' in df.columns:
+            df_chronological = df.sort_values('Date', ascending=True).reset_index(drop=True)
+            df_chronological['Phase_Change'] = df_chronological['Phase'] != df_chronological['Phase'].shift(1)
+            last_change_idx = df_chronological[df_chronological['Phase_Change']].index[-1] if not df_chronological[df_chronological['Phase_Change']].empty else 0
+            
+            current_phase_df = df_chronological.iloc[last_change_idx:]
+            phase_start_date = current_phase_df['Date'].min()
+            last_log_date = current_phase_df['Date'].max()
+            
+            days_in_phase = (last_log_date - phase_start_date).days
+            weeks_in_phase = (days_in_phase // 7) + 1
+            
+            col_p1, col_p2 = st.columns([1.5, 3])
+            with col_p1:
+                st.metric(label="📊 當前執行週期進度", value=f"{current_phase.split(' ')[0]}", delta=f"🚀 進入第 {weeks_in_phase} 週", delta_color="normal")
+            
+            with col_p2:
+                advice_msg = ""
+                phase_name = current_phase.split(' ')[0]
+                
+                if "適應" in phase_name:
+                    if weeks_in_phase >= 4:
+                        advice_msg = "⚠️ <b>適應期已達上限：</b> 你的肌腱與神經應該已完全適應當前動作。為了避免停滯，強烈建議下週切換至 <b>「肌肥大期」</b> 增加肌肉量！"
+                    else:
+                        advice_msg = "💡 <b>穩紮穩打：</b> 目前適應期進度良好。請專注於「動作控制與肌肉感受度」，先不要急著加重，為未來的爆發打好地基。"
+                elif "肌肥大" in phase_name:
+                    if weeks_in_phase >= 6:
+                        advice_msg = "⚠️ <b>肌肥大期即稍微收尾：</b> 超過 6 週的高容量訓練極易產生代謝疲勞。若感覺進步停滯，建議下週切換至 <b>「最大肌力期」</b>，用大重量將剛長出的肌肉轉化為真實力量！"
+                    else:
+                        advice_msg = "💡 <b>持續榨乾肌肉：</b> 目前正處於肌肥大的黃金成長期！請繼續保持高容量 (Volume) 訓練，並確保做到力竭邊緣 (RPE 8-9)。"
+                elif "最大肌力" in phase_name:
+                    if weeks_in_phase >= 4:
+                        advice_msg = "🚨 <b>神經疲勞警戒區：</b> 最大肌力期超過 4 週會對中樞神經(CNS)造成極大壓力。建議下週立刻安排 1 週的 <b>「減量期 (Deload)」</b>，或準備進行 <b>「PR 測試」</b>！"
+                    else:
+                        advice_msg = "💡 <b>挑戰極限：</b> 這是發展絕對力量的關鍵期！請確保組間休息時間充足 (3-5分鐘)，專注神經徵召，勇敢推起大重量。"
+                elif "減量" in phase_name:
+                    if weeks_in_phase > 1:
+                        advice_msg = "⚠️ <b>減量過度警告：</b> 減量期通常只需 1 週。疲勞已經消退，再不增加強度會開始流失體能！建議下週立刻進入新的 <b>「適應期」或「肌肥大期」</b>。"
+                    else:
+                        advice_msg = "💡 <b>積極恢復中：</b> 本週請將總容量砍半，重量維持在平常的 70-80% 左右。讓身體好好超補償，下週準備迎接更強的自己！"
+                elif "PR" in phase_name:
+                    advice_msg = "🏆 <b>享受成果：</b> 測完 PR 後，神經與關節會非常疲勞。下週請務必直接進入 <b>「減量期 (Deload)」</b>，或是重新啟動新的 <b>「適應期」</b>。"
+                else:
+                    advice_msg = "💡 <b>資料累積中：</b> 請持續穩定紀錄你的訓練數據。"
+                
+                if "⚠️" in advice_msg or "🚨" in advice_msg:
+                    st.markdown(f"""<div class="alert-card">{advice_msg}</div>""", unsafe_allow_html=True)
+                elif "🏆" in advice_msg:
+                    st.markdown(f"""<div class="gold-card">{advice_msg}</div>""", unsafe_allow_html=True)
+                else:
+                    st.markdown(f"""<div class="coach-card">{advice_msg}</div>""", unsafe_allow_html=True)
+
+        st.markdown("---")
+        st.markdown("### 🔍 近期單次訓練狀態分析")
         recent_df = df.sort_values('Date', ascending=False).head(5)
         
         avg_rpe = recent_df['RPE'].mean() if not recent_df.empty else 0
@@ -154,57 +206,74 @@ else:
             intensity_pct = latest_workout.get('Intensity_Pct', 0)
             
             if "肌肥大" in phase and (reps < 6 or intensity_pct > 85):
-                st.markdown(f"""<div class="alert-card"><b>⚠️ 週期目標偏移 (肌肥大期)</b><br>你目前處於肌肥大期，但設定的強度高達 {intensity_pct}% 或是次數過低 ({reps} 下)，這更偏向神經徵召。<br><b>建議：</b> 稍微降重至 <b>65%-80% 1RM</b>，將次數拉高至 <b>8-12 下</b>，以達到最佳的代謝壓力。</div>""", unsafe_allow_html=True)
+                st.markdown(f"""<div class="alert-card"><b>⚠️ 單次課表目標偏移 (肌肥大期)</b><br>你目前處於肌肥大期，但最新一筆設定的強度高達 {intensity_pct}% 或是次數過低 ({reps} 下)，這更偏向神經徵召。<br><b>建議：</b> 稍微降重至 <b>65%-80% 1RM</b>，將次數拉高至 <b>8-12 下</b>，以達到最佳的代謝壓力。</div>""", unsafe_allow_html=True)
             elif "最大肌力" in phase and (reps > 6 or intensity_pct < 80):
-                st.markdown(f"""<div class="alert-card"><b>⚠️ 週期目標偏移 (最大肌力期)</b><br>你目前處於最大肌力期，但訓練強度偏低 ({intensity_pct}%) 或是次數過多 ({reps} 下)。<br><b>建議：</b> 勇敢加重！請將重量提升至 <b>85%-95% 1RM</b>，次數控制在 <b>1-5 下</b>，專注神經系統徵召。</div>""", unsafe_allow_html=True)
+                st.markdown(f"""<div class="alert-card"><b>⚠️ 單次課表目標偏移 (最大肌力期)</b><br>你目前處於最大肌力期，但最新一筆訓練強度偏低 ({intensity_pct}%) 或是次數過多 ({reps} 下)。<br><b>建議：</b> 勇敢加重！請將重量提升至 <b>85%-95% 1RM</b>，次數控制在 <b>1-5 下</b>，專注神經系統徵召。</div>""", unsafe_allow_html=True)
             else:
-                st.markdown(f"""<div class="coach-card"><b>🎯 週期執行精準</b><br>你目前的訓練強度 ({intensity_pct}% 1RM) 與次數 ({reps} 下) 非常符合 <b>{phase.split(" ")[0]}</b> 的課表設計，請繼續保持這個紀律！</div>""", unsafe_allow_html=True)
+                st.markdown(f"""<div class="coach-card"><b>🎯 課表執行精準</b><br>最新一筆的訓練強度 ({intensity_pct}% 1RM) 與次數 ({reps} 下) 非常符合 <b>{phase.split(" ")[0]}</b> 的課表設計，請繼續保持這個紀律！</div>""", unsafe_allow_html=True)
 
-    # ----------------- 🟢 TAB 2: 疲勞與體能預測 -----------------
+    # ----------------- 🟢 TAB 2: 全新 ACWR 疲勞監控 -----------------
     with tab2:
-        st.markdown("### 🧬 體能超補償動態預測 (Banister Model)")
-        st.markdown("系統自動將你的 `訓練量 × RPE` 計算為**身體疲勞積累**與**長期體能適應**，藉此精準捕捉你何時達到超越極限的超補償狀態。")
+        st.markdown("### ⚖️ ACWR 急慢性負荷比 (傷病預警系統)")
+        st.markdown("職業運動普遍採用的黃金指標。不盲目要求休息，而是看你**「本週的訓練量 (急性)」**相較於**「過去四周打下的底子 (慢性)」**是否暴增。只要循序漸進，你的負荷可以無限疊加！")
         
-        daily_df = df.sort_values('Date').copy()
-        daily_df['Load'] = daily_df['Volume'] * (daily_df['RPE'] / 10.0)
-        daily_summary = daily_df.groupby('Date')['Load'].sum().reset_index()
-        
-        if not daily_summary.empty:
-            idx = pd.date_range(start=daily_summary['Date'].min(), end=daily_summary['Date'].max())
-            daily_summary.set_index('Date', inplace=True)
-            daily_summary = daily_summary.reindex(idx, fill_value=0).reset_index().rename(columns={'index': 'Date'})
+        if not df.empty and 'Volume' in df.columns:
+            load_df = df.copy()
+            load_df['Date'] = pd.to_datetime(load_df['Date'])
+            load_df['Load'] = load_df['Volume'] * (load_df['RPE'] if 'RPE' in load_df.columns else 1)
             
-            fitness, fatigue, readiness = [], [], []
-            fit_curr, fat_curr = 0, 0
+            latest_date = load_df['Date'].max()
             
-            for index, row in daily_summary.iterrows():
-                load = row['Load']
-                fit_curr = fit_curr * 0.95 + load * 0.1
-                fat_curr = fat_curr * 0.85 + load * 0.3
-                fitness.append(fit_curr)
-                fatigue.append(fat_curr)
-                readiness.append(fit_curr - fat_curr)
-                
-            daily_summary['體能指數 (Fitness)'] = fitness
-            daily_summary['疲勞指數 (Fatigue)'] = fatigue
-            daily_summary['準備度/超補償 (Readiness)'] = readiness
+            acute_start = latest_date - pd.Timedelta(days=6)
+            chronic_start = latest_date - pd.Timedelta(days=27)
             
-            fig_banister = go.Figure()
-            fig_banister.add_trace(go.Scatter(x=daily_summary['Date'], y=daily_summary['體能指數 (Fitness)'], name='📈 體能累積', line=dict(color='#10B981', width=2)))
-            fig_banister.add_trace(go.Scatter(x=daily_summary['Date'], y=daily_summary['疲勞指數 (Fatigue)'], name='📉 疲勞蓄積', line=dict(color='#EF4444', width=2, dash='dot')))
-            fig_banister.add_trace(go.Scatter(x=daily_summary['Date'], y=daily_summary['準備度/超補償 (Readiness)'], name='🔥 競技準備度', fill='tozeroy', fillcolor='rgba(245, 158, 11, 0.2)', line=dict(color='#F59E0B', width=3)))
+            acute_load = load_df[(load_df['Date'] >= acute_start) & (load_df['Date'] <= latest_date)]['Load'].sum()
+            chronic_load_total = load_df[(load_df['Date'] >= chronic_start) & (load_df['Date'] <= latest_date)]['Load'].sum()
+            chronic_load_weekly_avg = chronic_load_total / 4.0
             
-            fig_banister.update_layout(xaxis_title="日期", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-            st.plotly_chart(fig_banister, use_container_width=True)
+            acwr = acute_load / chronic_load_weekly_avg if chronic_load_weekly_avg > 0 else 0
             
-            latest_readiness = readiness[-1]
-            with st.expander("🗣️ 科學化 Tapering 備戰策略演算法判讀"):
-                if latest_readiness > max(readiness) * 0.7 and "減量" in str(current_phase):
-                    st.markdown(f"""<div class="gold-card"><b>🏆 進入黃金超補償窗口！</b><br>數據顯示你目前的準備度高達 {latest_readiness:.1f}，且疲勞已大幅衰減。<br><b>測驗指引：</b> 這是衝擊 <b>1RM 生涯新紀錄 (PR)</b> 的絕佳完美時機！本週請保持高神經興奮度，直接進行最大強度測試。</div>""", unsafe_allow_html=True)
-                elif latest_readiness < 0:
-                    st.markdown(f"""<div class="alert-card"><b>🚨 處於「機能低迷期」</b><br>當前你的疲勞值大於體能適應（準備度：{latest_readiness:.1f}）。<br><b>調整指引：</b> 此時強行測驗只會增加受傷機率。請立刻開始進行 <b>減量調整 (Tapering)</b>：維持原本訓練強度的 85%，但將總組數砍掉 50%，讓疲勞歸零！</div>""", unsafe_allow_html=True)
-                else:
-                    st.markdown(f"""<div class="coach-card"><b>💪 穩健體能堆疊期</b><br>目前的準備度狀態平穩 ({latest_readiness:.1f})，身體正在適應當前訓練總量。<br><b>調整指引：</b> 請繼續按照原有週期穩步推進，累積足夠的體能底蘊。</div>""", unsafe_allow_html=True)
+            col_a1, col_a2, col_a3 = st.columns(3)
+            col_a1.metric("🔴 急性負荷 (近7天總和)", f"{acute_load:,.0f} AU")
+            col_a2.metric("🔵 慢性負荷 (近4週平均)", f"{chronic_load_weekly_avg:,.0f} AU")
+            
+            acwr_color = "normal"
+            if acwr < 0.8:
+                acwr_status = "📉 訓練量不足 (Under-training)"
+                acwr_msg = f"""<div class="coach-card"><b>💡 體能流失警告：</b> 你這禮拜的訓練量遠低於過去四周的平均水準 (ACWR: {acwr:.2f})。如果不是刻意減量，請趕快加把勁，不然辛苦練出來的底子會流失喔！</div>"""
+            elif 0.8 <= acwr <= 1.3:
+                acwr_status = "🟢 黃金適應區 (Sweet Spot)"
+                acwr_msg = f"""<div class="gold-card"><b>🏆 完美的漸進性超負荷！</b><br>你這週的負荷與過去一個月的底子完美契合 (ACWR: {acwr:.2f})。受傷機率極低，且體能正在穩定成長，請繼續保持這個節奏！</div>"""
+            elif 1.3 < acwr <= 1.5:
+                acwr_status = "🟡 疲勞警戒區 (Caution)"
+                acwr_color = "off"
+                acwr_msg = f"""<div class="alert-card" style="border-left-color: #F59E0B;"><b>⚠️ 疲勞攀升中：</b> 你的急性負荷偏高 (ACWR: {acwr:.2f})。身體正在承受較大的壓力，請確保睡眠充足與營養補充，下次訓練可稍微下調強度。</div>"""
+            else:
+                acwr_status = "🚨 傷病高危險區 (Danger Zone)"
+                acwr_color = "inverse"
+                acwr_msg = f"""<div class="alert-card"><b>🚨 受傷風險暴增！</b><br>你這週的訓練量突然暴增太多 (ACWR 高達 {acwr:.2f})！神經與肌肉完全來不及修復，繼續硬練極度容易受傷。請立刻暫停大重量訓練，啟動主動恢復！</div>"""
+
+            col_a3.metric("🎯 ACWR 指數", f"{acwr:.2f}", acwr_status, delta_color=acwr_color)
+            
+            st.markdown(acwr_msg, unsafe_allow_html=True)
+            st.markdown("---")
+            
+            st.markdown("#### 🗓️ 週疲勞總量堆疊圖 (Weekly Stress Stacking)")
+            st.markdown("用「週」為單位，一眼看穿你的疲勞起伏。顏色區塊代表該週各肌群的疲勞佔比。")
+            
+            weekly_df = load_df.copy()
+            weekly_df['Week'] = weekly_df['Date'].dt.strftime('%Y-W%V')
+            weekly_group = weekly_df.groupby(['Week', 'Muscle_Group'])['Load'].sum().reset_index()
+            
+            if not weekly_group.empty:
+                fig_weekly = px.bar(weekly_group, x='Week', y='Load', color='Muscle_Group', 
+                                    title="每週肌群疲勞堆疊軌跡",
+                                    labels={'Load': '訓練壓力指數 (AU)', 'Week': '年份-週數'},
+                                    color_discrete_sequence=px.colors.qualitative.Pastel)
+                fig_weekly.update_layout(barmode='stack', xaxis_type='category')
+                st.plotly_chart(fig_weekly, use_container_width=True)
+            else:
+                st.info("尚無足夠數據繪製週疲勞堆疊圖。")
 
     # ----------------- 🟢 TAB 3: 數據視覺化圖表 -----------------
     with tab3:
@@ -214,17 +283,26 @@ else:
         
         with col_chart1:
             if 'Exercise' in df.columns:
-                selected_ex = st.selectbox("選擇主項動作查看 1RM 突破", df['Exercise'].dropna().unique())
-                ex_df = df[df['Exercise'] == selected_ex].sort_values('Date')
-                
-                if not ex_df.empty:
-                    max_1rm = ex_df['Est_1RM'].max()
-                    latest_1rm = ex_df.iloc[-1]['Est_1RM']
-                    st.metric("🎯 預估 1RM 最高紀錄 / 當前狀態", f"{max_1rm} kg", f"當前: {latest_1rm} kg")
+                # 🟢 只抓取備註欄位含有 [主項] 標籤的動作
+                if 'Notes' in df.columns:
+                    main_exercises = df[df['Notes'].astype(str).str.contains(r'\[主項\]', regex=True, na=False)]['Exercise'].dropna().unique()
+                else:
+                    main_exercises = []
+
+                if len(main_exercises) > 0:
+                    selected_ex = st.selectbox("選擇主項動作查看 1RM 突破", main_exercises)
+                    ex_df = df[df['Exercise'] == selected_ex].sort_values('Date')
                     
-                    fig_line = px.line(ex_df, x='Date', y='Est_1RM', markers=True, title=f"{selected_ex} - 漸進性超負荷曲線")
-                    fig_line.update_traces(line_color='#F59E0B', marker=dict(size=8))
-                    st.plotly_chart(fig_line, use_container_width=True)
+                    if not ex_df.empty:
+                        max_1rm = ex_df['Est_1RM'].max()
+                        latest_1rm = ex_df.iloc[-1]['Est_1RM']
+                        st.metric("🎯 預估 1RM 最高紀錄 / 當前狀態", f"{max_1rm} kg", f"當前: {latest_1rm} kg")
+                        
+                        fig_line = px.line(ex_df, x='Date', y='Est_1RM', markers=True, title=f"{selected_ex} - 漸進性超負荷曲線")
+                        fig_line.update_traces(line_color='#F59E0B', marker=dict(size=8))
+                        st.plotly_chart(fig_line, use_container_width=True)
+                else:
+                    st.info("尚無「主項」訓練紀錄可供 1RM 曲線分析。")
 
         with col_chart2:
             if 'Muscle_Group' in df.columns and 'Volume' in df.columns:
@@ -287,7 +365,22 @@ else:
                 
                 st.markdown(f"""<div class="radar-insight-card">{explanation}</div>""", unsafe_allow_html=True)
 
-
+        st.markdown("---")
+        st.markdown("#### 🎯 週期化訓練強度 (% 1RM) 軌跡觀測")
+        if 'Intensity_Pct' in df.columns:
+            intensity_df = df[(df['Intensity_Pct'] > 0) & (df['Volume'] > 0)].copy()
+            if not intensity_df.empty:
+                fig_int = px.scatter(
+                    intensity_df, x='Date', y='Intensity_Pct', color='Phase', size='Volume',
+                    hover_name='Exercise', hover_data={'Date': True, 'Weight_kg': True, 'Reps': True, 'Sets': True, 'Volume': False},
+                    labels={'Intensity_Pct': '目標強度 (% 1RM)', 'Date': '訓練日期', 'Phase': '訓練週期'},
+                    color_discrete_sequence=px.colors.qualitative.Bold
+                )
+                fig_int.update_traces(marker=dict(line=dict(width=1, color='rgba(255,255,255,0.8)')))
+                fig_int.update_layout(yaxis=dict(range=[0, max(110, intensity_df['Intensity_Pct'].max() + 10)]))
+                st.plotly_chart(fig_int, use_container_width=True)
+            else:
+                st.info("尚無有效的強度 % 數據可以繪製圖表。")
 
     # ----------------- 🟢 TAB 4: InBody 體態與失衡檢視 -----------------
     with tab4:
